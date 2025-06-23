@@ -10,47 +10,56 @@ import os
 # Set page config
 st.set_page_config(
     page_title="Prediksi Diabetes",
+    page_icon="🩺",
     layout="wide"
 )
 
-# Load and train model
-@st.cache_data
-def load_and_train_model():
-    """Load dataset and train the SVM model"""
+# Load saved model
+@st.cache_resource
+def load_saved_model():
+    """Load model yang sudah disimpan"""
     try:
-        # Load dataset
-        diabetes_dataset = pd.read_csv('Diabetes.csv')
+        # Load model (gunakan joblib karena lebih efisien untuk sklearn)
+        model = pickle.load(open('diabetes_model.pkl', 'rb'))
         
-        # Prepare features and target
-        X = diabetes_dataset.drop(columns='Outcome', axis=1)
-        Y = diabetes_dataset['Outcome']
+        # Load model info
+        with open('model_info.pkl', 'rb') as file:
+            model_info = pickle.load(file)
         
-        # Split data
-        X_train, X_test, Y_train, Y_test = train_test_split(
-            X, Y, test_size=0.2, stratify=Y, random_state=2
-        )
-        
-        # Train model
-        model = svm.SVC(kernel='linear')
-        model.fit(X_train, Y_train)
-        
-        # Calculate accuracies
-        train_accuracy = accuracy_score(model.predict(X_train), Y_train)
-        test_accuracy = accuracy_score(model.predict(X_test), Y_test)
-        
-        return model, train_accuracy, test_accuracy, diabetes_dataset
+        return model, model_info
     
+    except FileNotFoundError as e:
+        st.error(f"""
+         **Model file tidak ditemukan!**
+        
+        Pastikan Anda sudah menjalankan script training terlebih dahulu:
+        ```python
+        python train_and_save_model.py
+        ```
+        
+        File yang dibutuhkan:
+        - diabetes_model.pkl
+        - model_info.pkl
+        """)
+        return None, None
+
+@st.cache_data
+def load_dataset():
+    """Load dataset untuk informasi saja"""
+    try:
+        return pd.read_csv('Diabetes.csv')
     except FileNotFoundError:
-        st.error("File 'Diabetes.csv' tidak ditemukan. Pastikan file dataset ada di direktori yang sama.")
-        return None, None, None, None
+        st.warning("Dataset tidak ditemukan untuk ditampilkan.")
+        return None
 
 # Main app
 def main():
-    st.title("Aplikasi Prediksi Diabetes")
+    st.title("🩺 Aplikasi Prediksi Diabetes")
     st.markdown("---")
     
     # Load model and data
-    model, train_acc, test_acc, dataset = load_and_train_model()
+    model, model_info = load_saved_model()
+    dataset = load_dataset()
     
     if model is None:
         st.stop()
@@ -62,7 +71,7 @@ def main():
     if page == "Prediksi":
         prediction_page(model)
     elif page == "Informasi Model":
-        model_info_page(train_acc, test_acc)
+        model_info_page(model_info)
     else:
         dataset_page(dataset)
 
@@ -82,7 +91,7 @@ def prediction_page(model):
         
         glucose = st.number_input(
             "Kadar Glukosa", 
-            min_value=0, max_value=200,
+            min_value=0, max_value=200, 
             help="Konsentrasi glukosa plasma dalam tes toleransi glukosa oral 2 jam"
         )
         
@@ -101,7 +110,7 @@ def prediction_page(model):
     with col2:
         insulin = st.number_input(
             "Insulin", 
-            min_value=0, max_value=900, 
+            min_value=0, max_value=900,
             help="Insulin serum 2 jam (mu U/ml)"
         )
         
@@ -155,26 +164,32 @@ def prediction_page(model):
                 st.write(f"**Diabetes Pedigree:** {diabetes_pedigree}")
                 st.write(f"**Umur:** {age}")
 
-def model_info_page(train_acc, test_acc):
+def model_info_page(model_info):
     st.header("Informasi Model")
+    
+    if model_info is None:
+        st.error("Informasi model tidak tersedia.")
+        return
     
     col1, col2 = st.columns(2)
     
     with col1:
+        train_acc = model_info.get('training_accuracy', 0)
         st.metric("Akurasi Training", f"{train_acc:.4f}", f"{train_acc*100:.2f}%")
     
     with col2:
+        test_acc = model_info.get('test_accuracy', 0)
         st.metric("Akurasi Testing", f"{test_acc:.4f}", f"{test_acc*100:.2f}%")
     
     st.markdown("---")
     
     st.subheader("Spesifikasi Model")
-    st.write("""
-    - **Algoritma:** Support Vector Machine (SVM)
-    - **Kernel:** Linear
-    - **Train/Test Split:** 80%/20%
+    st.write(f"""
+    - **Algoritma:** {model_info.get('model_type', 'SVM')}
+    - **Kernel:** {model_info.get('kernel', 'Linear')}
+    - **Train/Test Split:** {int((1-model_info.get('test_size', 0.2))*100)}%/{int(model_info.get('test_size', 0.2)*100)}%
     - **Stratifikasi:** Ya (berdasarkan target variable)
-    - **Random State:** 2
+    - **Random State:** {model_info.get('random_state', 2)}
     """)
     
     st.subheader("Fitur Input")
@@ -194,6 +209,10 @@ def model_info_page(train_acc, test_acc):
 
 def dataset_page(dataset):
     st.header("Informasi Dataset")
+    
+    if dataset is None:
+        st.warning("Dataset tidak dapat ditampilkan.")
+        return
     
     # Dataset overview
     col1, col2, col3 = st.columns(3)
